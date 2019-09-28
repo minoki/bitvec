@@ -161,7 +161,7 @@ xorBits xs ys = dropWhileEnd $ runST $ do
   zs <- MU.replicate longerLen (Bit False)
   forM_ [0, wordSize .. shorterLen - 1] $ \i ->
     writeWord zs i (indexWord xs i `xor` indexWord ys i)
-  U.unsafeCopy (MU.drop shorterLen zs) (U.drop shorterLen longer)
+  U.copy (MU.drop shorterLen zs) (U.drop shorterLen longer)
   U.unsafeFreeze zs
 
 -- | Must be >= 2 * wordSize.
@@ -193,10 +193,10 @@ karatsuba xs ys
     m'    = ((lenXs `min` lenYs) + 1) `quot` 2
     m     = m' - modWordSize m'
 
-    xs0  = U.unsafeSlice 0 m xs
-    xs1  = U.unsafeSlice m (lenXs - m) xs
-    ys0  = U.unsafeSlice 0 m ys
-    ys1  = U.unsafeSlice m (lenYs - m) ys
+    xs0  = U.slice 0 m xs
+    xs1  = U.slice m (lenXs - m) xs
+    ys0  = U.slice 0 m ys
+    ys1  = U.slice m (lenYs - m) ys
 
     xs01 = xorBits xs0 xs1
     ys01 = xorBits ys0 ys1
@@ -230,8 +230,8 @@ mulBits' :: U.Vector Bit -> U.Vector Bit -> U.Vector Bit
 mulBits' xs ys = runST $ do
   zs <- MU.replicate lenZs (Bit False)
   forM_ [0 .. lenYs - 1] $ \k ->
-    when (unBit (U.unsafeIndex ys k)) $
-      zipInPlace xor xs (MU.unsafeSlice k (lenZs - k) zs)
+    when (unBit (ys U.! k)) $
+      zipInPlace xor xs (MU.slice k (lenZs - k) zs)
   U.unsafeFreeze zs
   where
     lenXs = U.length xs
@@ -258,19 +258,19 @@ quotRemBits xs ys
         lenQs = lenXs - lenYs + 1
     qs <- MU.replicate lenQs (Bit False)
     rs <- MU.replicate lenXs (Bit False)
-    U.unsafeCopy rs xs
+    U.copy rs xs
     forM_ [lenQs - 1, lenQs - 2 .. 0] $ \i -> do
-      Bit r <- MU.unsafeRead rs (lenYs - 1 + i)
+      Bit r <- MU.read rs (lenYs - 1 + i)
       when r $ do
-        MU.unsafeWrite qs i (Bit True)
+        MU.write qs i (Bit True)
         zipInPlace xor ys (MU.drop i rs)
-    let rs' = MU.unsafeSlice 0 lenYs rs
+    let rs' = MU.slice 0 lenYs rs
     (,) <$> U.unsafeFreeze qs <*> U.unsafeFreeze rs'
 
 dropWhileEnd
   :: U.Vector Bit
   -> U.Vector Bit
-dropWhileEnd xs = U.unsafeSlice 0 (go (U.length xs)) xs
+dropWhileEnd xs = U.slice 0 (go (U.length xs)) xs
   where
     go n
       | n < wordSize = wordSize - countLeadingZeros (indexWord xs 0 .&. loMask n)

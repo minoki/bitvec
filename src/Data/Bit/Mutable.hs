@@ -66,7 +66,7 @@ cloneToWordsM v = do
   let lenBits  = MU.length v
       lenWords = nWords lenBits
   w@(BitMVec _ _ arr) <- MU.unsafeNew (mulWordSize lenWords)
-  MU.unsafeCopy (MU.slice 0 lenBits w) v
+  MU.copy (MU.slice 0 lenBits w) v
   MU.set (MU.slice lenBits (mulWordSize lenWords - lenBits) w) (Bit False)
   pure $ MU.MV_Word $ P.MVector 0 lenWords arr
 {-# INLINE cloneToWordsM #-}
