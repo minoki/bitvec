@@ -185,6 +185,7 @@ readWord !(BitMVec off len' arr) !i' = do
 -- | write a word at the given bit offset in little-endian order (i.e., the LSB will correspond to the bit at the given address, the 2's bit will correspond to the address + 1, etc.).  If the offset is such that the word extends past the end of the vector, the word is truncated and as many low-order bits as possible are written.
 writeWord :: PrimMonad m => U.MVector (PrimState m) Bit -> Int -> Word -> m ()
 writeWord !(BitMVec _ 0 _) _ _ = pure ()
+#ifndef BITVEC_THREADSAFE
 writeWord !(BitMVec off len' arr) !i' !x = do
   let len    = off + len'
       lenMod = modWordSize len
@@ -221,6 +222,47 @@ writeWord !(BitMVec off len' arr) !i' !x = do
         writeByteArray arr (loIx + 1)
           $   (hiWord .&. hiMask nMod)
           .|. (x `unsafeShiftR` (wordSize - nMod))
+#else
+writeWord !(BitMVec off len' arr@(MutableByteArray mba)) !i' !x@(W# x#) = do
+  let len    = off + len'
+      lenMod = modWordSize len
+      i      = off + i'
+      nMod   = modWordSize i
+      loIx@(I# loIx#)   = divWordSize i
+
+  if nMod == 0
+    then if len >= i + wordSize
+      then primitive $ \state ->
+        (# atomicWriteIntArray# mba loIx# (word2Int# x#) state, () #)
+      else do
+        let W# andMask# = hiMask lenMod
+            W# orMask#  = x .&. loMask lenMod
+        primitive $ \state ->
+          let !(# state',  _ #) = fetchAndIntArray# mba loIx# (word2Int# andMask#) state  in
+            let !(# state'', _ #) = fetchOrIntArray#  mba loIx# (word2Int# orMask#)  state' in
+              (# state'', () #)
+    else if loIx == divWordSize (len - 1)
+      then do
+        loWord <- readByteArray arr loIx
+        if lenMod == 0
+          then
+            writeByteArray arr loIx
+            $   (loWord .&. loMask nMod)
+            .|. (x `unsafeShiftL` nMod)
+          else
+            writeByteArray arr loIx
+            $   (loWord .&. (loMask nMod .|. hiMask lenMod))
+            .|. ((x `unsafeShiftL` nMod) .&. loMask lenMod)
+      else do
+        loWord <- readByteArray arr loIx
+        writeByteArray arr loIx
+          $   (loWord .&. loMask nMod)
+          .|. (x `unsafeShiftL` nMod)
+        hiWord <- readByteArray arr (loIx + 1)
+        writeByteArray arr (loIx + 1)
+          $   (hiWord .&. hiMask nMod)
+          .|. (x `unsafeShiftR` (wordSize - nMod))
+#endif
 #if __GLASGOW_HASKELL__ >= 800
 {-# SPECIALIZE writeWord :: U.MVector s Bit -> Int -> Word -> ST s () #-}
 #endif
