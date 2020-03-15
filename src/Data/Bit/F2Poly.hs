@@ -7,6 +7,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MagicHash                  #-}
 {-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE UnliftedFFITypes           #-}
 
 #ifndef BITVEC_THREADSAFE
 module Data.Bit.F2Poly
@@ -43,6 +44,11 @@ import qualified Data.Vector.Unboxed.Mutable as MU
 import GHC.Generics
 import Numeric
 
+#if defined(CLMUL_ENABLED)
+import Foreign.C.Types (CSize(..))
+import System.IO.Unsafe
+#endif
+
 #if UseIntegerGmp
 import qualified Data.Vector.Primitive as P
 import GHC.Exts
@@ -50,6 +56,8 @@ import GHC.Integer.GMP.Internals
 import GHC.Integer.Logarithms
 import Unsafe.Coerce
 #endif
+
+#include "MachDeps.h"
 
 -- | Binary polynomials of one variable, backed
 -- by an unboxed 'Data.Vector.Unboxed.Vector' 'Bit'.
@@ -226,7 +234,19 @@ mulBits xs ys
     lenXs = U.length xs
     lenYs = U.length ys
 
+#if defined(CLMUL_ENABLED) && WORD_SIZE_IN_BITS == 64
+foreign import ccall unsafe "bitvec_f2polymul"
+  c_mulBits :: CSize -> ByteArray# -> CSize -> ByteArray# -> MutableByteArray# RealWorld -> IO ()
+#endif
+
 mulBits' :: U.Vector Bit -> U.Vector Bit -> U.Vector Bit
+#if defined(CLMUL_ENABLED) && WORD_SIZE_IN_BITS == 64
+mulBits' (BitVec 0 lenXs (ByteArray xa)) (BitVec 0 lenYs (ByteArray ya)) = unsafeDupablePerformIO $ do
+  let lenZs = lenXs + lenYs - 1
+  zs@(BitMVec 0 _ (MutableByteArray za)) <- MU.replicate lenZs (Bit False)
+  c_mulBits (fromIntegral $ nWords lenXs) xa (fromIntegral $ nWords lenYs) ya za
+  U.unsafeFreeze zs
+#endif
 mulBits' xs ys = runST $ do
   zs <- MU.replicate lenZs (Bit False)
   forM_ [0 .. lenYs - 1] $ \k ->
